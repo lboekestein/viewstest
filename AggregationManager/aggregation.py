@@ -85,6 +85,8 @@ class AggregationManager:
             if not isinstance(df[col].dtype, pl.datatypes.List):
                 raise TypeError(f"Target column '{col}' must be a list, got {df[col].dtype}")
 
+        # TODO drop irrelevant columns
+
         # Append model, increase model count
         self.models.append(df)
         self.n_models += 1
