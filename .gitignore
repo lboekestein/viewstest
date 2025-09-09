@@ -3,4 +3,6 @@ views-pipeline-core/
 views_outreach/
 views-evaluation/
 views-models/
+AggregationManager/__pycache__/
+__pycache__/
 .idea/
