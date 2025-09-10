@@ -119,15 +119,11 @@ class AggregationManager:
                 # verify weights format, length
                 if isinstance(self.weights, list) and all(isinstance(w, float) for w in self.weights):
                     if len(self.weights) == self.n_models:
+
                         weights = self._normalize_weights()
 
-                        if not n_samples:
-                            #TODO should this default to the largest sample size in the models? Or a set value?
-                            # n_samples == max_sample_size(joined)
-                            pass
-
-                        #TODO
-                        # pooled_df = self._linear_pool_resample(joined, weights, n_samples)
+                        #TODO call linear pooling implementation
+                        # pooled_df = self._linear_pool_resample(joined, weights=weights, n_samples=n_samples)
                         # return pooled_df
 
                         pass
@@ -139,12 +135,16 @@ class AggregationManager:
             else:
                 raise ValueError("Weights must be specified for weighted aggregation")
 
-                # TODO this could be changed to defaulting to averaging instead
+                #TODO this could be changed to defaulting to averaging instead
+                # pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
+                # return pooled_df
 
         # Average aggregation
         elif method == "average":
 
-            # TODO
+            #TODO
+            # pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
+            # return pooled_df
 
             pass
 
@@ -152,7 +152,8 @@ class AggregationManager:
         elif method == "concat":
 
             # TODO check sample-size consistency
-            # TODO implement linear pooling
+            # TODO implement concat aggregation method
+            # pooled_df = self._concat_pool_resample(joined, n_samples)
 
             pass
 
@@ -208,15 +209,7 @@ class AggregationManager:
         pass
 
 
-    def _normalize_weights(self) -> List[float]:
-        """
-        Normalize model weights
 
-        Returns:
-            list of normalized weights that sum to 1
-        """
-        total = sum(self.weights)
-        return [w / total for w in self.weights]
 
     def _inner_join_model_predictions(self) -> pl.DataFrame:
         """
@@ -238,4 +231,68 @@ class AggregationManager:
             return joined
         else:
             raise ValueError("No models to join. Add at least one model using add_model()")
+
+
+    def _linear_pool_resample(
+            self,
+            df: pl.DataFrame,
+            weights: Optional[List[float]] = None,
+            n_samples: Optional[int] = None
+    ) -> pl.DataFrame:
+        """
+        Perform linear pooling with resampling to combine distributions
+
+        Parameters:
+            df: Polars DataFrame with target columns containing distribution samples
+            weights: list of floats (default: equal weights)
+            n_samples: int, number of samples to use for resampling (default: largest model sample size)
+
+        Returns:
+            Polars DataFrame with pooled distributions
+        """
+
+        # set weights to equal if not specified
+        if not weights:
+            weights = [1 / self.n_models] * self.n_models
+
+        # set sample size
+        if not n_samples:
+
+            n_samples = 1000
+
+            #TODO should this default to the largest sample size in the models? Or a set value?
+            # e.g. n_samples == max_sample_size(joined)
+
+            #Can we assume that the sample size is consistent across predictions for one model?
+
+
+        pooled_cols = []
+
+        for target_column in self.target_cols:
+
+            # find target columns
+            model_cols = [c for c in df.columns if c.startswith(target_column)]
+
+            # TODO Implementation here
+
+            pass
+
+        #TODO
+        # pooled = df.select(self.index_cols)
+        # for i, col in enumerate(self.target_cols):
+        #     pooled = pooled.with_columns([pooled_cols[i].alias(col)])
+        # return pooled
+
+
+
+    def _normalize_weights(self) -> List[float]:
+        """
+        Normalize model weights
+
+        Returns:
+            list of normalized weights that sum to 1
+        """
+        total = sum(self.weights)
+        return [w / total for w in self.weights]
+
 
