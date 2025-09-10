@@ -1,6 +1,7 @@
 import polars as pl
 import pandas as pd
 import numpy as np
+from functools import reduce
 from typing import List, Union, Optional, Dict, Callable
 from pathlib import Path
 import logging
@@ -109,24 +110,36 @@ class AggregationManager:
             Polars DataFrame with aggregated distributions
         """
 
+        # join dataframes
+        joined = self._inner_join_model_predictions()
+
         # Weighted aggregation
         if method == "weighted":
             if self.weights:
-                # verify weights format
+                # verify weights format, length
                 if isinstance(self.weights, list) and all(isinstance(w, float) for w in self.weights):
+                    if len(self.weights) == self.n_models:
+                        weights = self._normalize_weights()
 
-                    pass
+                        if not n_samples:
+                            #TODO should this default to the largest sample size in the models? Or a set value?
+                            # n_samples == max_sample_size(joined)
+                            pass
 
-                    # TODO check len(self.weights) == self.n_models
-                    # TODO normalize weights so sum(weights) == 1
+                        #TODO
+                        # pooled_df = self._linear_pool_resample(joined, weights, n_samples)
+                        # return pooled_df
 
-
+                        pass
+                    else:
+                        raise ValueError(f"Got {self.n_models} models but {self.weights} were given."
+                                         f" Number of weights must match number of models")
                 else:
                     raise ValueError(f"Weights must be specified as list of floats, got {type(self.weights)}")
             else:
                 raise ValueError("Weights must be specified for weighted aggregation")
 
-                # TODO this could be changed to default to averaging instead
+                # TODO this could be changed to defaulting to averaging instead
 
         # Average aggregation
         elif method == "average":
@@ -193,3 +206,36 @@ class AggregationManager:
         """
         # Implementation here
         pass
+
+
+    def _normalize_weights(self) -> List[float]:
+        """
+        Normalize model weights
+
+        Returns:
+            list of normalized weights that sum to 1
+        """
+        total = sum(self.weights)
+        return [w / total for w in self.weights]
+
+    def _inner_join_model_predictions(self) -> pl.DataFrame:
+        """
+        Inner join model predictions based in index columns.
+
+        Returns:
+            Polars DataFrame with combined model predictions
+        """
+
+        # join dataframes on index columns
+        if self.models:
+            joined = reduce(
+                lambda left, right: left.join(right, on=self.index_cols, how="inner"),
+                self.models,
+            )
+
+            # Optional; could raise or print statement with warning if, how many rows are dropped
+
+            return joined
+        else:
+            raise ValueError("No models to join. Add at least one model using add_model()")
+
