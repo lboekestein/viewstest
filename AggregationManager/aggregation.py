@@ -40,6 +40,7 @@ class AggregationManager:
         Parameters:
             data: Polars DataFrame, Pandas DataFrame or path to parquet/csv file containing predictions
         """
+
         # Read in dataframe as polars dataframe
         if isinstance(data, pl.DataFrame):
             df = data
@@ -65,7 +66,6 @@ class AggregationManager:
                 "Type must be either Polars DataFrame, Pandas DataFrame or path to parquet/csv file"
             )
 
-
         # Validate that index columns are in dataframe
         missing_index_cols = [c for c in self.index_cols if c not in df.columns]
         if missing_index_cols:
@@ -85,7 +85,8 @@ class AggregationManager:
             if not isinstance(df[col].dtype, pl.datatypes.List):
                 raise TypeError(f"Target column '{col}' must be a list, got {df[col].dtype}")
 
-        # TODO drop irrelevant columns
+        # select only index columns and target columns
+        df = df.select(self.index_cols + self.target_cols)
 
         # Append model, increase model count
         self.models.append(df)
@@ -108,14 +109,49 @@ class AggregationManager:
             Polars DataFrame with aggregated distributions
         """
 
+        # Weighted aggregation
+        if method == "weighted":
+            if self.weights:
+                # verify weights format
+                if isinstance(self.weights, list) and all(isinstance(w, float) for w in self.weights):
+
+                    pass
+
+                    # TODO check len(self.weights) == self.n_models
+                    # TODO normalize weights so sum(weights) == 1
 
 
+                else:
+                    raise ValueError(f"Weights must be specified as list of floats, got {type(self.weights)}")
+            else:
+                raise ValueError("Weights must be specified for weighted aggregation")
+
+                # TODO this could be changed to default to averaging instead
+
+        # Average aggregation
+        elif method == "average":
+
+            # TODO
+
+            pass
+
+        # Concat aggregation
+        elif method == "concat":
+
+            # TODO check sample-size consistency
+            # TODO implement linear pooling
+
+            pass
+
+
+        else:
+            raise ValueError(f"Unsupported aggregation method: {method}. Must be one of 'weighted', 'average' or 'concat'")
 
         pass
 
     def aggregate_point_predictions(
             self,
-            aggregation_func: str = "mean",
+            aggregation_func: Union[str, Callable[[pl.Series], float]] = "mean",
             use_weights: bool = True
     ) -> pl.DataFrame:
         """
@@ -128,7 +164,24 @@ class AggregationManager:
         Returns:
             Polars DataFrame with aggregated point predictions
         """
-        # Implementation here
+
+        if aggregation_func == "mean":
+            aggregation_func = pl.Series.mean
+        elif aggregation_func == "median":
+            aggregation_func = pl.Series.median
+        elif aggregation_func == "min":
+            aggregation_func = pl.Series.min
+        elif aggregation_func == "max":
+            aggregation_func = pl.Series.max
+        elif callable(aggregation_func):
+            aggregation_func = aggregation_func
+        else:
+            raise ValueError(f"Unsupported aggregation function: \"{aggregation_func}\", must be one of 'mean', 'median', "
+                             f"'min', 'max' or custum aggregation function of form Callable[[pl.Series], float]")
+
+
+        # TODO Implementation here
+
         pass
 
     def calculate_ensemble_statistics(self) -> pl.DataFrame:
