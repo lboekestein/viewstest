@@ -34,6 +34,7 @@ class AggregationManager:
         self.target_cols = target_cols
         self.n_models = 0
 
+
     def add_model(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]) -> None:
         """
         Add a model's predictions to the aggregation pool.
@@ -163,6 +164,7 @@ class AggregationManager:
 
         pass
 
+
     def aggregate_point_predictions(
             self,
             aggregation_func: Union[str, Callable[[pl.Series], float]] = "mean",
@@ -198,6 +200,7 @@ class AggregationManager:
 
         pass
 
+
     def calculate_ensemble_statistics(self) -> pl.DataFrame:
         """
         Calculate comprehensive statistics for the ensemble distribution.
@@ -205,10 +208,35 @@ class AggregationManager:
         Returns:
             Polars DataFrame with ensemble statistics including mean, std, and quantiles
         """
-        # Implementation here
-        pass
 
+        # Extract all samples as polars DataFrame
+        samples_df = self._extract_samples_as_polars()
 
+        # Calculate statistics for each variable and index combination
+        stats = (
+            samples_df
+            .group_by([self.index_cols[0], self.index_cols[1], "variable"])
+            .agg([
+                pl.col("value").mean().alias("mean"),
+                pl.col("value").std().alias("std"),
+                pl.col("value").quantile(0.05).alias("q05"),
+                pl.col("value").quantile(0.25).alias("q25"),
+                pl.col("value").quantile(0.50).alias("q50"),
+                pl.col("value").quantile(0.75).alias("q75"),
+                pl.col("value").quantile(0.95).alias("q95"),
+                pl.col("value").quantile(0.98).alias("q98"),
+                pl.col("value").max().alias("max")
+            ])
+        )
+
+        # Pivot to wide format
+        aggregated_stats = stats.pivot(
+            index=[self.index_cols[0], self.index_cols[1]],
+            columns="variable",
+            values=["mean", "std", "q05", "q25", "q50", "q75", "q95", "q98", "max"]
+        )
+
+        return aggregated_stats
 
 
     def _inner_join_model_predictions(self) -> pl.DataFrame:
@@ -284,7 +312,6 @@ class AggregationManager:
         # return pooled
 
 
-
     def _normalize_weights(self) -> List[float]:
         """
         Normalize model weights
@@ -294,5 +321,18 @@ class AggregationManager:
         """
         total = sum(self.weights)
         return [w / total for w in self.weights]
+
+
+    def _extract_samples_as_polars(self) -> pl.DataFrame:
+        """
+        Extract all samples as polars dataframes
+
+        Returns:
+            Polars DataFrame with all samples as polars dataframe
+        """
+
+        # TODO implementation here
+
+        pass
 
 
