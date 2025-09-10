@@ -123,11 +123,9 @@ class AggregationManager:
 
                         weights = self._normalize_weights()
 
-                        #TODO call linear pooling implementation
-                        # pooled_df = self._linear_pool_resample(joined, weights=weights, n_samples=n_samples)
-                        # return pooled_df
+                        pooled_df = self._linear_pool_resample(joined, weights=weights, n_samples=n_samples)
+                        return pooled_df
 
-                        pass
                     else:
                         raise ValueError(f"Got {self.n_models} models but {self.weights} were given."
                                          f" Number of weights must match number of models")
@@ -143,26 +141,21 @@ class AggregationManager:
         # Average aggregation
         elif method == "average":
 
-            #TODO
-            # pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
-            # return pooled_df
+            pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
+            return pooled_df
 
-            pass
 
         # Concat aggregation
         elif method == "concat":
 
+            raise NotImplementedError("Concat aggregation not implemented yet.")
+
             # TODO check sample-size consistency
-            # TODO implement concat aggregation method
+            #TODO implement concat aggregation method
             # pooled_df = self._concat_pool_resample(joined, n_samples)
-
-            pass
-
 
         else:
             raise ValueError(f"Unsupported aggregation method: {method}. Must be one of 'weighted', 'average' or 'concat'")
-
-        pass
 
 
     def aggregate_point_predictions(
@@ -293,7 +286,6 @@ class AggregationManager:
 
             #Can we assume that the sample size is consistent across predictions for one model?
 
-
         pooled_cols = []
 
         for target_column in self.target_cols:
@@ -301,15 +293,26 @@ class AggregationManager:
             # find target columns
             model_cols = [c for c in df.columns if c.startswith(target_column)]
 
-            # TODO Implementation here
+            def pool_row(row):
+                samples_list = [np.array(row[col]) for col in model_cols]
 
-            pass
+                # decide how many samples to draw from each model
+                sample_counts = np.random.multinomial(n_samples, weights)
 
-        #TODO
-        # pooled = df.select(self.index_cols)
-        # for i, col in enumerate(self.target_cols):
-        #     pooled = pooled.with_columns([pooled_cols[i].alias(col)])
-        # return pooled
+                pool = []
+                for s, count in zip(samples_list, sample_counts):
+                    if len(s) > 0 and count > 0:
+                        pool.extend(np.random.choice(s, size=count, replace=True))
+                return pool
+
+            pool = df.select(model_cols).map_rows(pool_row)
+            pooled_cols.append(pool)
+
+        # combine back into polar dataframe with index columns
+        pooled = df.select(self.index_cols)
+        for i, col in enumerate(self.target_cols):
+            pooled = pooled.with_columns([pooled_cols[i].alias(col)])
+        return pooled
 
 
     def _normalize_weights(self) -> List[float]:
