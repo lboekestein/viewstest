@@ -294,7 +294,8 @@ class AggregationManager:
             model_cols = [c for c in df.columns if c.startswith(target_column)]
 
             def pool_row(row):
-                samples_list = [np.array(row[col]) for col in model_cols]
+
+                samples_list = [np.array(val) for val in row]
 
                 # decide how many samples to draw from each model
                 sample_counts = np.random.multinomial(n_samples, weights)
@@ -303,15 +304,15 @@ class AggregationManager:
                 for s, count in zip(samples_list, sample_counts):
                     if len(s) > 0 and count > 0:
                         pool.extend(np.random.choice(s, size=count, replace=True))
-                return pool
+                return (pool,)
 
-            pool = df.select(model_cols).map_rows(pool_row)
-            pooled_cols.append(pool)
+            pools = df.select(model_cols).map_rows(pool_row)
+            pooled_cols.append(pools.to_series().alias(target_column))
 
         # combine back into polar dataframe with index columns
         pooled = df.select(self.index_cols)
-        for i, col in enumerate(self.target_cols):
-            pooled = pooled.with_columns([pooled_cols[i].alias(col)])
+        for col in pooled_cols:
+            pooled = pooled.with_columns(col)
         return pooled
 
 
@@ -334,8 +335,8 @@ class AggregationManager:
             Polars DataFrame with all samples as polars dataframe
         """
 
-        # TODO implementation here
+        raise NotImplementedError("_extract_samples_as_polars() not implemented")
 
-        pass
+        # TODO implementation here
 
 
