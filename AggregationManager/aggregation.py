@@ -114,23 +114,14 @@ class AggregationManager:
         # join dataframes
         joined = self._inner_join_model_predictions()
 
+
         # Weighted aggregation
         if method == "weighted":
             if self.weights:
-                # verify weights format, length
-                if isinstance(self.weights, list) and all(isinstance(w, float) for w in self.weights):
-                    if len(self.weights) == self.n_models:
+                weights = self._normalize_weights()
 
-                        weights = self._normalize_weights()
-
-                        pooled_df = self._linear_pool_resample(joined, weights=weights, n_samples=n_samples)
-                        return pooled_df
-
-                    else:
-                        raise ValueError(f"Got {self.n_models} models but {self.weights} were given."
-                                         f" Number of weights must match number of models")
-                else:
-                    raise ValueError(f"Weights must be specified as list of floats, got {type(self.weights)}")
+                pooled_df = self._linear_pool_resample(joined, weights=weights, n_samples=n_samples)
+                return pooled_df
             else:
                 raise ValueError("Weights must be specified for weighted aggregation")
 
@@ -174,6 +165,7 @@ class AggregationManager:
             Polars DataFrame with aggregated point predictions
         """
 
+        # specify aggregation function
         if aggregation_func == "mean":
             aggregation_func = pl.Series.mean
         elif aggregation_func == "median":
@@ -189,9 +181,43 @@ class AggregationManager:
                              f"'min', 'max' or custum aggregation function of form Callable[[pl.Series], float]")
 
 
-        # TODO Implementation here
+        # join dataframes
+        joined = self._inner_join_model_predictions()
 
-        pass
+        # aggregate individual model distribution samples into point predictions
+        point_cols = []
+
+        for target_column in self.target_cols:
+
+            model_cols = [c for c in joined.columns if c.startswith(target_column)]
+
+            for c in model_cols:
+                point_cols.append(
+                    pl.col(c).map_elements(aggregation_func, return_dtype=pl.Float64).alias(f"{c}_point")
+                )
+
+        point_df = joined.select(self.index_cols + point_cols)
+        point_agg = point_df.select(self.index_cols)
+
+        # aggregate individual model point predictions into one, using weights if specified
+        for target_column in self.target_cols:
+            model_point_cols = [c for c in point_df.columns if c.startswith(target_column)]
+
+            if use_weights:
+                if self.weights:
+                    weights = self._normalize_weights()
+                    expr = sum(
+                        pl.col(c) * w for c, w in zip(model_point_cols, weights)
+                    )
+                else:
+                    raise ValueError("Weights must be specified for weighted aggregation")
+            else:
+                expr = pl.mean_horizontal(model_point_cols)
+
+            tmp = point_df.select(self.index_cols + [expr.alias(target_column)])
+            point_agg = point_agg.join(tmp, on=self.index_cols)
+
+        return point_agg
 
 
     def calculate_ensemble_statistics(self) -> pl.DataFrame:
@@ -319,12 +345,23 @@ class AggregationManager:
     def _normalize_weights(self) -> List[float]:
         """
         Normalize model weights
+        Also checks if weights are in right format and match number of models
 
         Returns:
             list of normalized weights that sum to 1
         """
-        total = sum(self.weights)
-        return [w / total for w in self.weights]
+
+        if isinstance(self.weights, list) and all(isinstance(w, float) for w in self.weights):
+            if len(self.weights) == self.n_models:
+
+                total = sum(self.weights)
+                return [w / total for w in self.weights]
+
+            else:
+                raise ValueError(f"Got {self.n_models} models but {len(self.weights)} weights were given."
+                                 f" Number of weights must match number of models")
+        else:
+            raise ValueError(f"Weights must be specified as list of floats, got {type(self.weights)}")
 
 
     def _extract_samples_as_polars(self) -> pl.DataFrame:
