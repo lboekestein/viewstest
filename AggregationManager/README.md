@@ -9,8 +9,9 @@ For exploring and testing purposes I'm using a [sandbox notebook](sandbox_aggreg
 
 ### TODO's
 - [X] Implement core AggregationManager class
-- [ ] Add weighted distribution aggregation
-- [ ] Implement point prediction aggregation
+- [X] Add weighted distribution aggregation
+- [ ] Add "concat" aggregation method
+- [X] Implement point prediction aggregation
 - [ ] Add ensemble statistics calculation
 - [ ] Write comprehensive PyTest tests
 - [ ] Create documentation and usage examples
