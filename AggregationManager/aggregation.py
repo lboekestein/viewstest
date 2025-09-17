@@ -92,6 +92,11 @@ class AggregationManager:
         # select only index columns and target columns
         df = df.select(self.index_cols + self.target_cols)
 
+        # rename target columns to specify model number
+        model_suffix = f"_m{self.n_models + 1}"
+        rename_map = {col: f"{col}{model_suffix}" for col in self.target_cols}
+        df = df.rename(rename_map)
+
         # Append model, increase model count
         self.models.append(df)
         self.n_models += 1
@@ -307,6 +312,8 @@ class AggregationManager:
                 lambda left, right: left.join(right, on=self.index_cols, how="inner"),
                 self.models,
             )
+
+
 
             # Optional; could raise or print statement with warning if, how many rows are dropped
 
