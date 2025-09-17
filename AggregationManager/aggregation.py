@@ -33,6 +33,8 @@ class AggregationManager:
         self.index_cols = index_cols
         self.target_cols = target_cols
         self.n_models = 0
+        # optional: but could be useful to avoid repetition of aggregation; store aggregated models
+        self.aggregated_df = None
 
 
     def add_model(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]) -> None:
@@ -97,7 +99,7 @@ class AggregationManager:
 
     def aggregate_distributions(
             self,
-            method: str = "concat",
+            method: str = "weighted",
             n_samples: Optional[int] = None
     ) -> pl.DataFrame:
         """
@@ -120,11 +122,12 @@ class AggregationManager:
             if self.weights:
                 weights = self._normalize_weights()
 
-                pooled_df = self._linear_pool_resample(joined, weights=weights, n_samples=n_samples)
+                pooled_df = self._linear_pooling_aggregation(joined, weights=weights, n_samples=n_samples)
+
+                self.aggregated_df = pooled_df
                 return pooled_df
             else:
                 raise ValueError("Weights must be specified for weighted aggregation")
-
                 #TODO this could be changed to defaulting to averaging instead
                 # pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
                 # return pooled_df
@@ -132,18 +135,43 @@ class AggregationManager:
         # Average aggregation
         elif method == "average":
 
-            pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
-            return pooled_df
+            pooled_df = self._linear_pooling_aggregation(joined, weights=None, n_samples=n_samples)
 
+            self.aggregated_df = pooled_df
+            return pooled_df
 
         # Concat aggregation
         elif method == "concat":
 
-            raise NotImplementedError("Concat aggregation not implemented yet.")
+            pooled_df = self._concatenate_aggregation(joined, weights=None, n_samples=n_samples)
 
-            # TODO check sample-size consistency
-            #TODO implement concat aggregation method
-            # pooled_df = self._concat_pool_resample(joined, n_samples)
+            self.aggregated_df = pooled_df
+            return pooled_df
+
+
+        # Weighted vincentization (Alternative to Linear pooling)
+        elif method == "vincentization_weighted":
+
+            if self.weights:
+                weights = self._normalize_weights()
+
+                pooled_df = self._vincentization_aggregation(joined, weights=weights, n_samples=n_samples)
+
+                self.aggregated_df = pooled_df
+                return pooled_df
+            else:
+                raise ValueError("Weights must be specified for weighted aggregation")
+                #TODO this could be changed to defaulting to averaging instead
+                # pooled_df = self._linear_pool_resample(joined, weights=None, n_samples=n_samples)
+                # return pooled_df
+
+        # Average vincentization (Alternative to Linear pooling)
+        elif method == "vincentization_average":
+
+            pooled_df = self._vincentization_aggregation(joined, weights=None, n_samples=n_samples)
+
+            self.aggregated_df = pooled_df
+            return pooled_df
 
         else:
             raise ValueError(f"Unsupported aggregation method: {method}. Must be one of 'weighted', 'average' or 'concat'")
@@ -228,30 +256,37 @@ class AggregationManager:
             Polars DataFrame with ensemble statistics including mean, std, and quantiles
         """
 
+        raise NotImplementedError("Calculate ensemble statistics not implemented.")
+
+        # if not aggregated yet, aggregate
+        if self.aggregated_df is None:
+            self.aggregated_df = self.aggregate_distributions()
+
+
         # Extract all samples as polars DataFrame
-        samples_df = self._extract_samples_as_polars()
+        samples_df = self.aggregated_df
 
         # Calculate statistics for each variable and index combination
         stats = (
             samples_df
-            .group_by([self.index_cols[0], self.index_cols[1], "variable"])
+            .group_by([self.index_cols[0], self.index_cols[1], self.target_cols])
             .agg([
-                pl.col("value").mean().alias("mean"),
-                pl.col("value").std().alias("std"),
-                pl.col("value").quantile(0.05).alias("q05"),
-                pl.col("value").quantile(0.25).alias("q25"),
-                pl.col("value").quantile(0.50).alias("q50"),
-                pl.col("value").quantile(0.75).alias("q75"),
-                pl.col("value").quantile(0.95).alias("q95"),
-                pl.col("value").quantile(0.98).alias("q98"),
-                pl.col("value").max().alias("max")
+                pl.col(self.target_cols).mean().alias("mean"),
+                pl.col(self.target_cols).std().alias("std"),
+                pl.col(self.target_cols).quantile(0.05).alias("q05"),
+                pl.col(self.target_cols).quantile(0.25).alias("q25"),
+                pl.col(self.target_cols).quantile(0.50).alias("q50"),
+                pl.col(self.target_cols).quantile(0.75).alias("q75"),
+                pl.col(self.target_cols).quantile(0.95).alias("q95"),
+                pl.col(self.target_cols).quantile(0.98).alias("q98"),
+                pl.col(self.target_cols).max().alias("max")
             ])
         )
 
         # Pivot to wide format
         aggregated_stats = stats.pivot(
             index=[self.index_cols[0], self.index_cols[1]],
-            columns="variable",
+            columns=self.target_cols,
             values=["mean", "std", "q05", "q25", "q50", "q75", "q95", "q98", "max"]
         )
 
@@ -280,7 +315,7 @@ class AggregationManager:
             raise ValueError("No models to join. Add at least one model using add_model()")
 
 
-    def _linear_pool_resample(
+    def _concatenate_aggregation(
             self,
             df: pl.DataFrame,
             weights: Optional[List[float]] = None,
@@ -341,6 +376,145 @@ class AggregationManager:
             pooled = pooled.with_columns(col)
         return pooled
 
+    def _linear_pooling_aggregation(
+            self,
+            df: pl.DataFrame,
+            weights: Optional[List[float]] = None,
+            n_samples: Optional[int] = None
+    ) -> pl.DataFrame:
+        """
+        Perform linear pooling
+
+        Parameters:
+            df: Polars DataFrame with target columns containing distribution samples
+            weights: list of floats (default: equal weights)
+            n_samples: int, number of samples to use for resampling (default: largest model sample size)
+
+        Returns:
+            Polars DataFrame with pooled distributions
+        """
+
+        # set weights to equal if not specified
+        if not weights:
+            weights = [1 / self.n_models] * self.n_models
+
+        # set sample size
+        if not n_samples:
+
+            n_samples = 1000
+
+            #TODO should this default to the largest sample size in the models? Or a set value?
+            # e.g. n_samples == max_sample_size(joined)
+
+            #Can we assume that the sample size is consistent across predictions for one model?
+
+        pooled_cols = []
+
+        for target_column in self.target_cols:
+
+            # find target columns
+            model_cols = [c for c in df.columns if c.startswith(target_column)]
+
+            def pool_row_linear(row):
+
+                # make list of samples
+                samples_list = [np.array(val) for val in row]
+                #print(samples_list)
+                resampled_list = []
+
+                # resample n_samples from each distribution sample
+                for sample in samples_list:
+                    resample = sorted(np.random.choice(sample, n_samples, replace=True))
+                    resampled_list.append(resample)
+
+                # take weighted average
+                lin_pooled = [
+                    sum(w * row[i] for w, row in zip(weights, resampled_list))
+                    for i in range(len(resampled_list[0]))
+                ]
+
+                return (lin_pooled,)
+
+            pools = df.select(model_cols).map_rows(pool_row_linear)
+            pooled_cols.append(pools.to_series().alias(target_column))
+
+        # combine back into polar dataframe with index columns
+        pooled = df.select(self.index_cols)
+        for col in pooled_cols:
+            pooled = pooled.with_columns(col)
+        return pooled
+
+
+    def _vincentization_aggregation(
+            self,
+            df: pl.DataFrame,
+            weights: Optional[List[float]] = None,
+            n_samples: Optional[int] = None
+    ) -> pl.DataFrame:
+        """
+        Perform vincentization based aggregation
+
+        Parameters:
+            df: Polars DataFrame with target columns containing distribution samples
+            weights: list of floats (default: equal weights)
+            n_samples: int, number of samples to use for resampling (default: largest model sample size)
+
+        Returns:
+            Polars DataFrame with pooled distributions
+        """
+
+        # set weights to equal if not specified
+        if not weights:
+            weights = [1 / self.n_models] * self.n_models
+
+        # set sample size
+        if not n_samples:
+
+            n_samples = 1000
+
+            #TODO should this default to the largest sample size in the models? Or a set value?
+            # e.g. n_samples == max_sample_size(joined)
+
+            #Can we assume that the sample size is consistent across predictions for one model?
+
+        else:
+            n_samples = n_samples // 2
+
+        pooled_cols = []
+
+        for target_column in self.target_cols:
+
+            # find target columns
+            model_cols = [c for c in df.columns if c.startswith(target_column)]
+
+            def pool_row_vincent(row):
+
+                # retrieve quantile space
+                quantile_levels = np.linspace(0, 1, n_samples)
+
+                # compute weighted quantiles across models
+                model_quantiles = []
+                for samples in row:
+                    arr = np.array(samples)
+                    model_quantiles.append(np.quantile(arr, quantile_levels))
+
+                # weighted quantile averages across models
+                pooled_q = [
+                    sum(w * model_quantiles[m][i] for m, w in enumerate(weights))
+                    for i in range(n_samples)
+                ]
+
+                return (pooled_q,)
+
+            # apply row-wise
+            pooled_series = df.select(model_cols).map_rows(pool_row_vincent)
+            pooled_cols.append(pooled_series.to_series().alias(target_column))
+
+        # combine back into polar dataframe with index columns
+        pooled = df.select(self.index_cols)
+        for col in pooled_cols:
+            pooled = pooled.with_columns(col)
+        return pooled
 
     def _normalize_weights(self) -> List[float]:
         """
